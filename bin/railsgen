@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+
+# =============================================================================
+# railsgen - Rails 8 + Inertia + React + TypeScript + Tailwind v4 Generator
+# =============================================================================
+#
+# Similar to thoughtbot/suspenders, this script creates a new Rails application
+# with a modern, production-ready stack pre-configured.
+#
+# Usage:
+#   railsgen myapp [options]
+#
+# Options:
+#   --database=DATABASE    Database (postgresql, mysql, sqlite3) [default: sqlite3]
+#   --skip-git             Don't initialize a git repository
+#   --help                 Show this help message
+#
+# =============================================================================
+
+set -e
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATE_PATH="${SCRIPT_DIR}/template.rb"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Print colored output
+print_color() {
+    local color=$1
+    shift
+    echo -e "${color}$@${NC}"
+}
+
+# Print banner
+print_banner() {
+    echo ""
+    print_color $CYAN "╔══════════════════════════════════════════════════════════════════╗"
+    print_color $CYAN "║                                                                  ║"
+    print_color $CYAN "║   🚀 railsgen v${VERSION}                                           ║"
+    print_color $CYAN "║                                                                  ║"
+    print_color $CYAN "║   Rails 8 + Inertia + React + TypeScript + Tailwind CSS v4      ║"
+    print_color $CYAN "║                                                                  ║"
+    print_color $CYAN "╚══════════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+# Print help
+print_help() {
+    print_banner
+    echo "Usage: railsgen APP_NAME [options]"
+    echo ""
+    echo "Creates a new Rails application with the following stack:"
+    echo "  • Rails 8"
+    echo "  • Tailwind CSS v4"
+    echo "  • Inertia.js + Vite + TypeScript + React"
+    echo "  • shadcn/ui components"
+    echo "  • Jest for frontend testing"
+    echo "  • RSpec + Capybara + FactoryBot for Rails testing"
+    echo "  • Devise authentication with Inertia pages"
+    echo "  • Pundit authorization"
+    echo "  • Pre-configured .claude/plans directory"
+    echo "  • Pre-configured CLAUDE.md"
+    echo ""
+    echo "Options:"
+    echo "  --database=DATABASE    Database adapter (postgresql, mysql, sqlite3)"
+    echo "                         Default: sqlite3"
+    echo "  --skip-git            Don't initialize a git repository"
+    echo "  --help, -h            Show this help message"
+    echo "  --version, -v         Show version"
+    echo ""
+    echo "Examples:"
+    echo "  railsgen myapp"
+    echo "  railsgen myapp --database=postgresql"
+    echo "  railsgen myapp --database=postgresql --skip-git"
+    echo ""
+}
+
+# Check dependencies
+check_dependencies() {
+    local missing=()
+    
+    if ! command -v ruby &> /dev/null; then
+        missing+=("ruby")
+    fi
+    
+    if ! command -v rails &> /dev/null; then
+        missing+=("rails")
+    fi
+    
+    if ! command -v node &> /dev/null; then
+        missing+=("node")
+    fi
+    
+    if ! command -v npm &> /dev/null; then
+        missing+=("npm")
+    fi
+    
+    if [ ${#missing[@]} -ne 0 ]; then
+        print_color $RED "Error: Missing required dependencies: ${missing[*]}"
+        echo ""
+        echo "Please install the following:"
+        for dep in "${missing[@]}"; do
+            case $dep in
+                ruby)
+                    echo "  • Ruby: https://www.ruby-lang.org/en/downloads/"
+                    ;;
+                rails)
+                    echo "  • Rails: gem install rails"
+                    ;;
+                node)
+                    echo "  • Node.js: https://nodejs.org/"
+                    ;;
+                npm)
+                    echo "  • npm: Included with Node.js"
+                    ;;
+            esac
+        done
+        exit 1
+    fi
+}
+
+# Check Ruby and Rails versions
+check_versions() {
+    local ruby_version=$(ruby -v | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    local rails_version=$(rails -v | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    local node_version=$(node -v | grep -oE '[0-9]+' | head -1)
+    
+    print_color $BLUE "Detected versions:"
+    echo "  Ruby:   $(ruby -v)"
+    echo "  Rails:  $(rails -v)"
+    echo "  Node:   $(node -v)"
+    echo "  npm:    $(npm -v)"
+    echo ""
+    
+    # Check Rails version (need 8+)
+    local rails_major=$(echo $rails_version | cut -d. -f1)
+    if [ "$rails_major" -lt 8 ]; then
+        print_color $YELLOW "Warning: This template is designed for Rails 8+. You have Rails $rails_version."
+        print_color $YELLOW "Some features may not work as expected."
+        echo ""
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+    
+    # Check Node version (need 18+)
+    if [ "$node_version" -lt 18 ]; then
+        print_color $RED "Error: Node.js 18+ is required. You have Node $(node -v)."
+        exit 1
+    fi
+}
+
+# Parse arguments
+parse_args() {
+    APP_NAME=""
+    DATABASE="sqlite3"
+    SKIP_GIT=""
+    EXTRA_ARGS=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --help|-h)
+                print_help
+                exit 0
+                ;;
+            --version|-v)
+                echo "railsgen version $VERSION"
+                exit 0
+                ;;
+            --database=*)
+                DATABASE="${1#*=}"
+                ;;
+            --skip-git)
+                SKIP_GIT="--skip-git"
+                ;;
+            -*)
+                EXTRA_ARGS="$EXTRA_ARGS $1"
+                ;;
+            *)
+                if [ -z "$APP_NAME" ]; then
+                    APP_NAME="$1"
+                else
+                    EXTRA_ARGS="$EXTRA_ARGS $1"
+                fi
+                ;;
+        esac
+        shift
+    done
+    
+    if [ -z "$APP_NAME" ]; then
+        print_color $RED "Error: APP_NAME is required"
+        echo ""
+        echo "Usage: railsgen APP_NAME [options]"
+        echo "Run 'railsgen --help' for more information."
+        exit 1
+    fi
+}
+
+# Create the application
+create_app() {
+    print_banner
+    
+    print_color $GREEN "Creating new Rails application: $APP_NAME"
+    print_color $BLUE "Database: $DATABASE"
+    echo ""
+    
+    # Check if template exists
+    if [ ! -f "$TEMPLATE_PATH" ]; then
+        print_color $RED "Error: Template not found at $TEMPLATE_PATH"
+        exit 1
+    fi
+    
+    # Check if directory already exists
+    if [ -d "$APP_NAME" ]; then
+        print_color $RED "Error: Directory '$APP_NAME' already exists."
+        exit 1
+    fi
+    
+    print_color $YELLOW "This will create a new Rails application with:"
+    echo "  • Rails 8 + Tailwind CSS v4"
+    echo "  • Inertia.js + Vite + TypeScript + React"
+    echo "  • shadcn/ui components"
+    echo "  • Jest + RSpec + Capybara + FactoryBot"
+    echo "  • Devise + Pundit"
+    echo "  • Pre-configured Claude files"
+    echo ""
+    
+    # Build rails new command
+    local cmd="rails new $APP_NAME"
+    cmd="$cmd --database=$DATABASE"
+    cmd="$cmd --skip-jbuilder"
+    cmd="$cmd --skip-test"
+    cmd="$cmd --skip-action-mailbox"
+    cmd="$cmd --skip-action-text"
+    cmd="$cmd --skip-active-storage"
+    cmd="$cmd -m $TEMPLATE_PATH"
+    
+    if [ -n "$SKIP_GIT" ]; then
+        cmd="$cmd $SKIP_GIT"
+    fi
+    
+    if [ -n "$EXTRA_ARGS" ]; then
+        cmd="$cmd $EXTRA_ARGS"
+    fi
+    
+    print_color $CYAN "Running: $cmd"
+    echo ""
+    
+    # Execute rails new
+    eval $cmd
+    
+    echo ""
+    print_color $GREEN "═══════════════════════════════════════════════════════════════════"
+    print_color $GREEN "✨ Application created successfully!"
+    print_color $GREEN "═══════════════════════════════════════════════════════════════════"
+    echo ""
+    print_color $YELLOW "Next steps:"
+    echo ""
+    echo "  cd $APP_NAME"
+    echo "  bin/dev"
+    echo ""
+    print_color $CYAN "Your app will be running at http://localhost:3000"
+    echo ""
+}
+
+# Main
+main() {
+    check_dependencies
+    parse_args "$@"
+    check_versions
+    create_app
+}
+
+main "$@"
